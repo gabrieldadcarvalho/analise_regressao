@@ -1,0 +1,297 @@
+---
+title: "Análise de regressão linear múltipla  para empresas de jornal"
+date: "19/03/2024"
+output:
+  html_document:
+    df_print: paged
+  pdf_document:
+    keep_tex: true
+  word_document: default
+header-includes:
+- \usepackage{fancyhdr}
+- \pagestyle{fancy}
+- \fancyhead{}
+- \fancyfoot{}
+- \fancyfoot[R]{\thepage}
+---
+
+### Introdução
+
+Este relatório tem como objetivo realizar uma análise exploratória seguida da proposição de um modelo de regressão linear múltipla para os dados contidos em *journals.txt*. O conjunto de dados compreende 180 empresas de jornais, cada uma caracterizada por 10 variáveis, descritas da seguinte forma:
+
+1. title: Categórica
+2. publisher: Categórica
+3. society: Categórica
+4. price: Numérica
+5. pages: Numérica
+6. charpp: Numérica
+7. citations: Numérica
+8. foundingyear: Numérica
+9. subs: Numérica
+10. field: Categórica
+
+
+## Análise Exploratória
+
+Neta etapa vamos fazer uma análise breve para verificar cada variável.
+
+```{r}
+#Obtendo a tabela de dados do repositório
+data <- read.table("https://raw.githubusercontent.com/gabrieldacarvalho/analise_regressao/main/multiple_linear_regression/journals/data_journals.txt")
+
+summary(data)
+```
+Para analisar a relação entre variáveis, vamos nos concentrar nas variáveis society, price, pages, charpp, citations, foundingyear e subs. A variável society é categórica binária, enquanto as demais são numéricas. Isso nos permitirá avaliar tanto a associação entre a variável categórica e as variáveis numéricas quanto as relações entre as variáveis numéricas entre si.
+
+```{r, fig.width=10, fig.height=6}
+# Criando um data frame com as variáveis  a serem analisadas
+data1 <- data[,3:9]
+plot(data1)
+```
+Analisando o gráfico de dispersão acima fica dificil de definir quais variaveis estão relacionada linearmente para conseguirmos definir um modelo de regressão linear, para isso vamos verificar a matriz de correlação
+
+```{r}
+cor(data1[, -1], method = "pearson")
+```
+Analisando a matriz de correlação de pearson, podemos ver que a variável subs é a que mais apresenta uma relação linear com as demais, mas logo abaixo vamos verificar a correlação de spearman adicionando a variável categórica *society* para verificar se a uma melhora na relação da correlação das variáveis.
+
+```{r}
+data1$society_num <- ifelse(data1$society == "yes", 1, 0)
+cor(data1[, -1], method = "spearman")
+```
+Podemos verificar que a correlação da variável society não é tão impactante, portanto vamos focar na analise das variáveis numéricas.
+```{r}
+# Criando um data frame com as variaveis a serem analisadas
+data1 <- data[,4:9]
+```
+
+## Transformação
+
+Vamos explorar a possibilidade de melhorar a relação entre as variáveis aplicando uma transformação logarítmica.
+
+```{r}
+data1_log <- log(data1)
+cor(data1_log)
+```
+
+```{r, fig.width=10, fig.height=6}
+plot(data1, main = "Gráfico de dispersão dados normais")
+plot(data1_log, main = "Gráfico de dispersão dados transformado (log)")
+```
+
+## Modelos regressivos
+
+Apesar da transformação logarítmica, não observamos uma melhora significativa na relação linear entre as variáveis, o que sugere que outras abordagens podem ser necessárias para capturar melhor a relação entre elas. Além disso, é importante notar que as variáveis citations e pages estão altamente correlacionadas.
+
+Para investigar mais a fundo, vamos propor dois modelos:
+
+*Modelo 1 (fit1):* Utilizando os dados sem transformação.
+
+*Modelo 2 (fit2):* Utilizando os dados após a transformação logarítmica, bem como a inclusão da interação entre pages e citations.
+
+Além disso, para a construção do nosso modelo, optaremos por selecionar a variável subs como nossa variável resposta. Essa escolha é fundamentada na observação de uma relação mais forte entre subs e as outras variáveis, sugerindo que subs pode ser a variável dependente que estamos interessados em prever.
+
+```{r}
+pc = data1$citations / data1$pages
+fit1 <- lm(data1$subs ~ data1$price + pc + data1$charpp)
+fit2 <- lm(data1_log$subs ~ data1_log$price + log(pc) + data1_log$charpp)
+```
+```{r}
+summary(fit1)
+```
+```{r}
+summary(fit2)
+```
+Afim de melhorar o R² ajustado do modelo, vamos tirar o intercepto
+
+```{r}
+fit1 <- lm(data1$subs ~ -1 + data1$price + pc + data1$charpp)
+fit2 <- lm(data1_log$subs ~ -1 + data1_log$price + log(pc) + data1_log$charpp)
+```
+
+```{r}
+summary(fit1)
+```
+```{r}
+summary(fit2)
+```
+É interessante observar que o R² ajustado do modelo sem intercepto apresentou uma melhora considerável. Além disso, o modelo fit2, que inclui a transformação logarítmica, alcançou um R² de 0.9765. Esses resultados sugerem que as variáveis podem de fato ter uma relação linear, o que fortalece a validade do modelo proposto.
+
+```{r}
+y <- data1_log$subs
+x <- as.matrix(fit2$model[,2:ncol(fit2$model)])
+B <- t(as.matrix(solve(t(x) %*% x) %*% t(x) %*% y))
+H <- x %*% solve((t(x) %*% x)) %*% t(x)
+```
+
+```{r}
+cor(x)
+```
+
+Após a divisão entre a variável *citations* e *pages*, que fornece uma medida de quantas citações há por página, observamos uma melhoria na correlação entre as variáveis. Isso sugere que não há evidências significativas de multicolinearidade entre elas. Além disso, a presença da matriz HAT (H) reforça a possível inexistência de multicolinearidade, como podemos verificar abaixo.
+
+```{r}
+# Print resumido da matrix Hat
+print(as.matrix(H[1:10,1:7]))
+```
+
+```{r}
+
+df <- fit2$df.residual
+n <- nrow(data1_log)
+p <- ncol(fit2$model) - 1
+  
+ssreg <- B %*% t(x) %*% y
+sstot <- t(y) %*% y
+ssres <- sstot - ssreg
+
+msres <- as.matrix(ssres / (n - p))
+var_B1 <- msres * solve(t(x) %*% x)[1,1]
+var_B2 <- msres * solve(t(x) %*% x)[2,2]
+var_B3 <- msres * solve(t(x) %*% x)[3,3]
+
+r <- ssreg / sstot
+r_j <-  1- ((ssres / (n - p)) / (sstot / (n - 1)))
+
+
+# Criar uma matriz para armazenar os intervalos de confiança
+ic_B <- matrix(NA, nrow = 3, ncol = 2)
+
+# Nomear as linhas e colunas da matriz
+rownames(ic_B) <- c("B1", "B2", "B3")
+colnames(ic_B) <- c("Limite Inferior", "Limite Superior")
+
+# Intervalos de confianças para os parâmetros B1, B2, B3, B4:
+ic_B[1,1] <- B[1] + qt(0.025, df) * sqrt(var_B1)
+ic_B[1,2] <- B[1] + qt(0.975, df) * sqrt(var_B1)
+
+ic_B[2,1] <- B[2] + qt(0.025, df) * sqrt(var_B2)
+ic_B[2,2] <- B[2] + qt(0.975, df) * sqrt(var_B2)
+
+
+ic_B[3,1] <- B[3] + qt(0.025, df) * sqrt(var_B2)
+ic_B[3,2] <- B[3] + qt(0.975, df) * sqrt(var_B2)
+
+
+# Exibir a matriz
+print(ic_B)
+
+# Estimativa pontual para os parâmetros
+rownames(B) <- c("Estimativa Pontual")
+print(t(B))
+
+# Intervalo de confiança para sigma² com um nivel de significância de 5%
+ic_SIGMA2 <- matrix(NA, nrow = 1, ncol = 2)
+rownames(ic_SIGMA2) <- c("σ²")
+colnames(ic_SIGMA2) <- c("Limite Inferior", "Limite Superior")
+ic_SIGMA2[1, 1] <- df*msres/qchisq(0.975, df)
+ic_SIGMA2[1, 2] <- df*msres/qchisq(0.025, df)
+
+# Estimativa intervala para o sigma² com um nivel de significância de 5%
+ic_SIGMA2
+
+# Estimativa pontual para sigma²
+rownames(msres) <- c("σ²")
+colnames(msres) <- c("Estimativa Pontual")
+msres
+```
+
+
+## Analise de resíduo
+
+
+```{r, fig.width=10, fig.height=6}
+# Residuos padronizados
+
+residuos_padronizados <- (data1_log$subs - fit2$fitted.values) / as.vector(sqrt(msres))
+plot(residuos_padronizados, main = "Gráfico de dispersão residuos padronizados")
+hist(residuos_padronizados, freq=FALSE)
+lines(density(residuos_padronizados), col='blue')
+boxplot(residuos_padronizados, main = 'Box-Plot: Residuos Padronizados')
+
+# Residuos studentizados
+
+residuos_studentizado <- (data1_log$subs - fit2$fitted.values) / as.vector(sqrt(msres[1] * (1 - diag(H))))
+plot(residuos_studentizado, main = "Gráfico de dispersão residuos Studentizado")
+hist(residuos_studentizado, freq=FALSE)
+lines(density(residuos_studentizado), col='blue')
+boxplot(residuos_studentizado, main = 'Box-Plot: Resíduos Studentizado')
+```
+
+
+```{r}
+# inveralo dos x's
+print('x1:')
+c(min(x[data1_log$price]),max(x[data1_log$price]))
+print('x2:')
+c(min(x[data1_log$citations]),max(x[data1_log$citations]))
+print('x3:')
+c(min(x[data1_log$foundingyear]),max(x[data1_log$foundingyear]))
+print('x4:')
+c(min(x[data1_log$pages]),max(x[data1_log$pages]))
+
+x0 <- t(t(c(6, 6, 4.4)))
+extrapolacao <- t(x0) %*% solve((t(x) %*% x)) %*% x0
+if (extrapolacao > max(H)) {
+  print("As novas observações são uma extrapolação")
+} else {
+  print("Não é uma extrapolação")
+}
+
+
+# Propondo modelo reduzido 1 (sem pages)
+fit_red <- lm(data1_log$subs ~ -1 + data1_log$price + data1_log$citations + data1_log$foundingyear)
+summary(fit_red)
+
+x_red <- as.matrix(fit_red$model[,2:ncol(fit_red$model)])
+B_red <- t(as.matrix(solve(t(x_red) %*% x_red) %*% t(x_red) %*% y))
+ssreg_red <- B_red %*% t(x_red) %*% y
+ssres_res = sstot - ssreg_red
+anova
+
+ssextra = ssreg - ssreg_red
+
+# Teste de hipotese para verificar se o ganho é relevante
+f0 <- ssextra/(ssres / (p - 1))
+p_f = pf(f0, 1, (p-1))
+
+p_f
+
+# Propondo modelo reduzido 2 (citations = foundingyear
+
+# Propondo modelo reduzido 1 (sem pages)
+w = (data1_log$citations + data1_log$foundingyear)
+fit_red1 <- lm(data1_log$subs ~ -1 + data1_log$price + w)
+summary(fit_red1)
+
+x_red1 <- as.matrix(fit_red1$model[,2:ncol(fit_red1$model)])
+B_red1 <- t(as.matrix(solve(t(x_red1) %*% x_red1) %*% t(x_red1) %*% y))
+ssreg_red1 <- B_red1 %*% t(x_red1) %*% y
+
+ssextra = ssreg - ssreg_red1
+
+# Teste de hipotese para verificar se o ganho é relevante
+f0 <- ssextra/(ssres / (p - 1))
+p_f = pf(f0, 1, (p-1))
+
+p_f
+
+
+# Verificação multicolinearidade
+
+
+# Página e Citação possui uma correlação linear elevada, 0.6464066
+c = solve(t(x) %*% x)
+
+
+# Dado os fatores de inflação de variância, não tem multicolinearidade
+vif1 <- c[1,1]
+vif2 <- c[2,2]
+vif3 <- c[3,3]
+
+vif1
+vif2
+vif3
+```
+
+
